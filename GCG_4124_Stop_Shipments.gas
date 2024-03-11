@@ -1,0 +1,174 @@
+Program.Sub.ScreenSU.Start
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+
+Variable.Global.sOrderNo.Declare(String)
+Variable.Global.sOrderLine.Declare(String)
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+F.Intrinsic.Control.SetErrorHandler("Main_Err")
+F.Intrinsic.Control.ClearErrors
+
+V.Local.sError.Declare(String)
+'This program will prompt the user before creating a new shipment if there is a zero qty on hand for that particular part.
+'Order Entry>Transactions>Shipments>New>Ok (After selecting a shipment)
+' and Shipping Receiving>Transactions>Shipments>New (After selecting a shipment)
+'Coded by:WAW
+'Date 7/8/2016
+
+'open connection
+F.ODBC.connection!conx.OpenConnection(V.Ambient.PDSN,V.Ambient.puser,V.Ambient.PPass)
+
+'check to see if the pre-save hook fired
+F.Intrinsic.Control.If(V.Caller.Hook,=,28530)
+'	v.Global.sOrderLine.Set(v.Passed.)
+'	v.Global.sOrderNo.Set(v.Passed.)
+	F.Intrinsic.Control.CallSub(Process)
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.CallSub(Unload)
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("Main_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4124_Stop_Shipments.gas",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.CallSub(Unload)
+Function.Intrinsic.Control.EndIf
+
+
+Program.Sub.Main.End
+
+Program.Sub.Unload.Start
+F.Intrinsic.Control.SetErrorHandler("Unload_Err")
+F.Intrinsic.Control.ClearErrors
+
+V.Local.sError.Declare(String)
+
+'close connection to the database
+F.ODBC.Connection!conx.Close
+
+'end the program
+F.Intrinsic.Control.End
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("Unload_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4124_Stop_Shipments.gas",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.End
+Function.Intrinsic.Control.EndIf
+
+
+Program.Sub.Unload.End
+
+Program.Sub.Process.Start
+F.Intrinsic.Control.SetErrorHandler("Process_Err")
+F.Intrinsic.Control.ClearErrors
+
+V.Local.sError.Declare(String)
+V.Local.irows.Declare(Long)
+V.Local.iR.Declare(Long)
+V.Local.sret.Declare(String)
+V.Local.spart.Declare(String)
+V.Local.sloc.Declare(String)
+V.Local.ssql.Declare(String)
+V.Local.smsgline.Declare(String)
+V.Local.smsgfinal.Declare(String)
+V.Local.fqty.Declare(Float)
+V.Local.sbackordersql.Declare(String)
+V.Local.smsgret.Declare(String)
+V.Local.fqtyrequired.Declare(Float)
+V.Local.fqtyshipped.Declare(Float)
+V.Local.fqtyoutstanding.Declare(Float)
+
+F.Intrinsic.BDF.Load("AUX001","AUX001")
+F.Intrinsic.BDF.ReadRowCount("AUX001",V.Local.iRows)
+F.Intrinsic.Math.Sub(V.Local.iRows,1,V.Local.iRows)
+
+'loop through the parts to see which ones have 0 on hand qty
+F.Intrinsic.Control.For(V.Local.iR,0,V.Local.iRows,1)
+
+	F.Intrinsic.BDF.ReadRow("AUX001",V.Local.iR,V.Local.sRet)
+	F.Intrinsic.Control.If(V.Local.sRet.Trim,<>,"")
+		F.Intrinsic.String.Split(V.Local.sRet,"|~|",V.Local.sRet)
+		'get the part and location
+		V.Local.spart.Set(V.Local.sret(8))
+		'get the order and order line also
+		V.Global.sOrderLine.Set(V.local.sret(0))
+		F.Intrinsic.String.LPad(V.global.sOrderLine,"0",3,V.Global.sOrderLine)
+		F.Intrinsic.String.Build("{0}{1}",V.Global.sOrderLine,"0",V.Global.sOrderLine)
+		V.Global.sOrderNo.Set(V.local.sret(1))
+
+		V.Local.sloc.set(V.Local.sret(10))
+
+		'check the quantity on hand for each part
+		F.Intrinsic.String.Build("Select QTY_ONHAND, QTY_REQUIRED from V_INVENTORY_MSTR where PART = '{0}' and LOCATION = '{1}'",V.Local.spart.PSQLFriendly,V.Local.sloc.Trim,V.Local.ssql)
+		F.ODBC.Connection!conx.OpenRecordsetRO("rst",V.Local.sSQL)
+		F.Intrinsic.Control.If(V.ODBC.conx!rst.EOF,<>,True)
+			V.Local.fqtyrequired.Set(V.ODBC.conx!rst.FieldValTrim!QTY_REQUIRED)
+			'check the shipped qty
+			F.Intrinsic.String.Build("Select QTY_SHIPPED from V_SHIPMENT_LINES where ORDER_NO = '{0}' and ORDER_REC  = '{1}'",V.Global.sOrderNo.Trim,V.Global.sOrderLine.Trim,V.Local.sbackordersql)
+			F.ODBC.Connection!conx.OpenRecordsetRO("rstShip",V.Local.sbackorderSQL)
+			F.Intrinsic.Control.If(V.ODBC.conx!rstship.EOF,<>,True)
+				V.Local.fqtyshipped.Set(V.ODBC.conx!rstShip.FieldValTrim!QTY_SHIPPED)
+				F.Intrinsic.math.Sub(V.Local.fqtyrequired,V.Local.fqtyshipped,V.Local.fqtyoutstanding)
+				F.Intrinsic.Control.If(V.Local.fqtyoutstanding,>,0)
+					V.Local.fqtyoutstanding.Set(0)
+					V.Local.fqtyrequired.Set(0)
+					V.Local.fqtyshipped.Set(0)
+					F.ODBC.conx!rst.Close
+					F.odbc.conx!rstShip.Close
+			
+					F.Intrinsic.Control.Next(V.Local.iR)
+				F.Intrinsic.Control.endif
+			F.Intrinsic.Control.EndIf
+			F.odbc.conx!rstShip.Close
+
+
+			'see if the qty on hand is 0, if so begin building the custom message
+			F.Intrinsic.Control.If(V.ODBC.conx!rst.FieldValTrim!QTY_ONHAND,=,0)
+				'see if the message has already been built
+				F.Intrinsic.Control.If(V.Local.smsgfinal,=,"")
+					F.Intrinsic.String.Build("Part: {0} Location: {1}",V.Local.spart,V.Local.sloc,V.Local.smsgline)
+					V.Local.smsgfinal.Set(V.Local.smsgline)
+				F.Intrinsic.Control.Else
+					F.Intrinsic.String.Build("Part: {0} Location: {1}",V.Local.spart,V.Local.sloc,V.Local.smsgline)
+					F.Intrinsic.String.build("{0}{1}{2}",V.Local.smsgfinal,V.Ambient.NewLine,V.Local.smsgline,V.Local.smsgfinal)
+				F.Intrinsic.Control.EndIf
+			F.Intrinsic.Control.endif
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.EndIf
+	F.ODBC.conx!rst.Close
+F.Intrinsic.Control.Next(V.Local.iR)
+
+'if the final msg string is not blank display a message box
+F.Intrinsic.Control.If(V.Local.smsgfinal,<>,"")
+	F.Intrinsic.String.Build("{0}{1}{2}","The following parts have 0 Qty on Hand",V.Ambient.NewLine,V.Local.smsgfinal,V.Local.smsgfinal)
+	F.Intrinsic.UI.Msgbox(V.local.smsgfinal)
+	'check to see what the user selected
+'	F.Intrinsic.Control.If(V.Local.smsgret,=,7)
+		V.Passed.777777.Set(1)
+'	F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("Process_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4124_Stop_Shipments.gas",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.CallSub(Unload)
+Function.Intrinsic.Control.EndIf
+
+
+Program.Sub.Process.End
+
+Program.Sub.Comments.Start
+${$0$}$GCG_4124_Stop_Shipments$}$WAW$}$7/8/2016
+Program.Sub.Comments.End
+
